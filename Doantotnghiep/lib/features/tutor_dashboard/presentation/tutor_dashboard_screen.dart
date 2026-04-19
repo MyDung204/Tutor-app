@@ -50,6 +50,7 @@ class _TutorDashboardScreenState extends ConsumerState<TutorDashboardScreen> {
         ref.invalidate(tutorRequestsProvider);
         ref.invalidate(bookingProvider);
         ref.invalidate(unreadNotificationCountProvider);
+        ref.invalidate(walletProvider);
         
         // Show snackbar (Verified: this helps debugging)
         ScaffoldMessenger.of(context).showSnackBar(
@@ -74,7 +75,8 @@ class _TutorDashboardScreenState extends ConsumerState<TutorDashboardScreen> {
         ref.invalidate(bookingProvider);
         ref.invalidate(tutorRequestsProvider);
         ref.invalidate(unreadNotificationCountProvider);
-        ref.invalidate(notificationsProvider); // Essential for "Smart Content" listener
+        ref.invalidate(notificationsProvider); 
+        ref.invalidate(walletProvider);
         // Note: No snackbar here to avoid spamming usage
       }
     });
@@ -171,7 +173,8 @@ class _TutorDashboardScreenState extends ConsumerState<TutorDashboardScreen> {
             ref.invalidate(tutorClassProvider);
             ref.invalidate(tutorRequestsProvider);
             ref.invalidate(bookingProvider);
-            ref.invalidate(authRepositoryProvider); // Refresh user profile (rating)
+            ref.invalidate(walletProvider);
+            ref.invalidate(authRepositoryProvider); 
           },
           child: CustomScrollView(
             physics: const AlwaysScrollableScrollPhysics(), // Ensure scroll even if content is short
@@ -799,7 +802,7 @@ class _TutorDashboardScreenState extends ConsumerState<TutorDashboardScreen> {
             ),
             _buildQuickActionButton(
               context,
-              icon: Icons.pending_actions_rounded,
+              icon: Icons.assignment_ind_rounded,
               label: 'Yêu cầu',
               gradient: [const Color(0xFFF59E0B), const Color(0xFFFBBF24)],
               onTap: () => context.go('/tutor-dashboard/booking-requests'),

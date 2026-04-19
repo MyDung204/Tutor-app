@@ -39,7 +39,8 @@ class ChatMessage {
 
     String? url = json['attachment_url'];
     if (url != null && url.contains('localhost')) {
-       url = url.replaceFirst('localhost', '10.0.2.2');
+       // Replace localhost with 192.168.1.18 (Current Machine IP)
+       url = url.replaceFirst('localhost', '192.168.1.18');
     }
 
     return ChatMessage(
@@ -60,28 +61,36 @@ class ChatMessage {
 
   // New Factory for Firestore
   factory ChatMessage.fromFirestore(Map<String, dynamic> data, String id, String currentUserId) {
-    final senderId = data['sender_id'].toString();
+    final senderId = data['sender_id']?.toString() ?? '';
     final isUser = senderId == currentUserId;
     
     // Handle Timestamp
     DateTime time = DateTime.now();
     if (data['created_at'] != null) {
-      // cloud_firestore field
       try {
-        time = data['created_at'].toDate();
+        if (data['created_at'] is Timestamp) {
+          time = data['created_at'].toDate();
+        } else if (data['created_at'] is String) {
+          time = DateTime.parse(data['created_at']);
+        }
       } catch (e) {
         time = DateTime.now();
       }
     }
 
+    String? url = data['attachment_url'];
+    if (url != null && url.contains('localhost')) {
+       url = url.replaceFirst('localhost', '192.168.1.18');
+    }
+
     return ChatMessage(
-      id: id, // String ID now
+      id: id,
       text: data['content'] ?? '',
       isUser: isUser,
       time: time,
       isSystem: false,
       isRead: data['is_read'] == true,
-      attachmentUrl: data['attachment_url'],
+      attachmentUrl: url,
       attachmentType: data['type'] == 'text' ? null : data['type'],
       attachmentName: data['attachment_name'],
       offer: data['offer'] != null ? CourseOffer.fromMap(data['offer']) : null,

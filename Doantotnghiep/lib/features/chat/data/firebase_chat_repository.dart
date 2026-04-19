@@ -55,40 +55,9 @@ class FirebaseChatRepository {
 
     // Upload attachment if exists
     if (attachmentPath != null) {
-      print("FirebaseChatRepo: Starting upload for $attachmentPath");
-      try {
-          // 1. Try Firebase Storage first (if configured)
-          final file = File(attachmentPath);
-          final fileName = '${const Uuid().v4()}_${file.uri.pathSegments.last}';
-          final ref = _storage.ref().child('chat_attachments/$fileName');
-          
-          final uploadTask = await ref.putFile(file);
-          attachmentUrl = await uploadTask.ref.getDownloadURL();
-          attachmentName = file.uri.pathSegments.last;
-          print("FirebaseChatRepo: Firebase upload success: $attachmentUrl");
-      } catch (e) {
-         print("FirebaseChatRepo: Firebase Upload failed ($e). Trying Laravel fallback...");
-         try {
-            // 2. Fallback to Laravel Server
-            final file = File(attachmentPath);
-            final formData = FormData.fromMap({
-              'attachment': await MultipartFile.fromFile(file.path, filename: file.uri.pathSegments.last),
-            });
-            
-            // Note: _apiClient automatically adds Bearer Token
-            final response = await _apiClient.post('/chat/upload', data: formData);
-            if (response is Map && response.containsKey('url')) {
-                attachmentUrl = response['url'];
-                attachmentName = file.uri.pathSegments.last;
-                print("FirebaseChatRepo: Laravel upload success: $attachmentUrl");
-            } else {
-               throw Exception("Invalid response from server");
-            }
-         } catch (e2) {
-            print("FirebaseChatRepo: Laravel upload failed: $e2");
-            throw Exception("Gửi ảnh thất bại (Cả Firebase & Server đều lỗi).");
-         }
-      }
+      final uploadResult = await _uploadAttachment(attachmentPath);
+      attachmentUrl = uploadResult['url'];
+      attachmentName = uploadResult['name'];
     }
 
     final messageData = {
@@ -155,7 +124,6 @@ class FirebaseChatRepository {
   }
 
   Future<void> markAsRead(String conversationId, String userId) async {
-    // print("FirebaseChatRepo: markAsRead called for Conv: $conversationId, Reader: $userId");
     try {
       // 1. Reset unread count for this user
       await _firestore.collection('conversations').doc(conversationId).update({
@@ -163,8 +131,6 @@ class FirebaseChatRepository {
       });
 
       // 2. Mark individual messages AS READ
-      // Query ONLY by is_read to avoid complex index requirements.
-      // Filter sender_id client-side.
       final unreadSnapshot = await _firestore
           .collection('conversations')
           .doc(conversationId)
@@ -178,7 +144,7 @@ class FirebaseChatRepository {
 
       for (var doc in unreadSnapshot.docs) {
         final data = doc.data();
-        final senderId = data['sender_id'].toString();
+        final senderId = data['sender_id']?.toString();
         
         // Only mark if sender is NOT me (i.e. it's an incoming message)
         if (senderId != userId) {
@@ -189,10 +155,9 @@ class FirebaseChatRepository {
 
       if (updateCount > 0) {
         await batch.commit();
-        print("FirebaseChatRepo: Marked $updateCount messages as read.");
       }
     } catch (e) {
-      print("FirebaseChatRepo: markAsRead Error: $e");
+      // Error logging could go here if needed
     }
   }
 
@@ -239,10 +204,6 @@ class FirebaseChatRepository {
         'unread_counts': unreadCounts,
       });
     } else {
-      // Update member list and group name
-      // Be careful not to wipe existing unread_counts for existing members
-      // Only adding 0 for NEW members
-      
       final currentData = docSnap.data() as Map<String, dynamic>;
       final currentUnread = Map<String, dynamic>.from(currentData['unread_counts'] ?? {});
       
@@ -267,43 +228,29 @@ class FirebaseChatRepository {
     required String content,
     String? attachmentPath,
     String? senderName,
+    String? attachmentType = 'image',
   }) async {
     final conversationId = 'group_$groupId';
     
     String? attachmentUrl;
     String? attachmentName;
-    String attachmentType = 'image'; // Default to image for simple path
-
-    // Reuse upload logic (simplified for brevity, can copy from sendMessage)
+    
+    // Upload attachment if exists
     if (attachmentPath != null) {
-        // ... (Reuse existing logic or call internal helper if refactored)
-        // For now, assuming text-only or standard helper. 
-        // NOTE: In a real refactor, extract `_uploadFile` as a private method.
-        // I will copy the minimal needed logic or assume similar handling.
-         try {
-          final file = File(attachmentPath);
-          final formData = FormData.fromMap({
-            'attachment': await MultipartFile.fromFile(file.path, filename: file.uri.pathSegments.last),
-          });
-          final response = await _apiClient.post('/chat/upload', data: formData);
-           if (response is Map && response.containsKey('url')) {
-                attachmentUrl = response['url'];
-                attachmentName = file.uri.pathSegments.last;
-            }
-         } catch(e) {
-           print("Group Upload Error: $e");
-         }
+      final uploadResult = await _uploadAttachment(attachmentPath);
+      attachmentUrl = uploadResult['url'];
+      attachmentName = uploadResult['name'];
     }
 
     final messageData = {
       'sender_id': senderId,
       'sender_name': senderName ?? 'Thành viên',
       'content': content,
-      'type': attachmentUrl != null ? 'image' : 'text',
+      'type': attachmentUrl != null ? attachmentType : 'text',
       'attachment_url': attachmentUrl,
       'attachment_name': attachmentName,
       'created_at': FieldValue.serverTimestamp(),
-      'is_read': false, // Not really used for groups in same way
+      'is_read': false,
     };
 
     // Add to subcollection
@@ -319,7 +266,7 @@ class FirebaseChatRepository {
     
     // Build update map for unread counts
     final updateMap = <String, dynamic>{
-       'last_message': attachmentUrl != null ? '[Hình ảnh]' : content,
+       'last_message': attachmentUrl != null ? (attachmentType == 'image' ? '[Hình ảnh]' : '[Tệp tin]') : content,
        'last_sender_id': senderId,
        'updated_at': FieldValue.serverTimestamp(),
     };
@@ -359,20 +306,15 @@ class FirebaseChatRepository {
         'users': FieldValue.arrayUnion([userId]),
       });
 
-      // Ensure unread_counts key exists for this user
-      // We can't use dot notation for conditional update easily without fetching,
-      // but since we fetched docSnap:
       final data = docSnap.data() as Map<String, dynamic>;
       final unreadCounts = Map<String, dynamic>.from(data['unread_counts'] ?? {});
       
       if (!unreadCounts.containsKey(userId)) {
-        // If we just use update with dot notation, it works for maps
         await docRef.update({
           'unread_counts.$userId': 0,
         });
       }
       
-      // Update name if provided and not set/default
       if (groupName != null && data['group_name'] == null) {
          await docRef.update({'group_name': groupName});
       }
@@ -383,18 +325,44 @@ class FirebaseChatRepository {
   Future<void> removeMemberFromGroupConversation(String groupId, String userId) async {
     final docRef = _firestore.collection('conversations').doc('group_$groupId');
     
-    // Remove from 'users' array and 'unread_counts' map
-    // Note: Firestore arrayRemove only works for arrays. For map keys, we check/replace.
-    
     // 1. Remove from users array
     await docRef.update({
       'users': FieldValue.arrayRemove([userId]),
     });
 
-    // 2. Remove from unread_counts map (Need fetch first or use Delete)
-    // Firestore dot notation delete: 'unread_counts.userId': FieldValue.delete()
+    // 2. Remove from unread_counts map
     await docRef.update({
        'unread_counts.$userId': FieldValue.delete(),
     });
+  }
+
+  // Shared attachment upload logic
+  Future<Map<String, String?>> _uploadAttachment(String path) async {
+    final file = File(path);
+    final fileName = '${const Uuid().v4()}_${file.uri.pathSegments.last}';
+    
+    // 1. Try Firebase Storage first
+    try {
+      final ref = _storage.ref().child('chat_attachments/$fileName');
+      final uploadTask = await ref.putFile(file);
+      final url = await uploadTask.ref.getDownloadURL();
+      return {'url': url, 'name': file.uri.pathSegments.last};
+    } catch (e) {
+      // 2. Fallback to Laravel Server
+      try {
+        final formData = FormData.fromMap({
+          'attachment': await MultipartFile.fromFile(file.path, filename: file.uri.pathSegments.last),
+        });
+        
+        final response = await _apiClient.post('/chat/upload', data: formData);
+        if (response is Map && response.containsKey('url')) {
+          final url = response['url'];
+          return {'url': url, 'name': file.uri.pathSegments.last};
+        }
+        throw Exception("Invalid response from server");
+      } catch (e2) {
+        throw Exception("Gửi tập tin thất bại (Cả Firebase & Server đều lỗi).");
+      }
+    }
   }
 }

@@ -90,7 +90,7 @@ class _MyClassesScreenState extends ConsumerState<MyClassesScreen> {
         skipLoadingOnRefresh: true,
         data: (courses) {
           if (courses.isEmpty) {
-             return _buildEmptyState(context, ref, 'Chưa có lớp học nào', 'Tạo lớp học đầu tiên của bạn');
+             return _buildEmptyState(context, ref, 'Chưa có lớp học nào', 'Mở lớp học đầu tiên của bạn');
           }
           return ListView.builder(
             physics: const AlwaysScrollableScrollPhysics(),
@@ -382,7 +382,7 @@ class _MyClassesScreenState extends ConsumerState<MyClassesScreen> {
                       context: context, 
                       builder: (context) => AlertDialog(
                         title: const Text('Yêu cầu xác thực'),
-                        content: const Text('Bạn cần xác thực tài khoản (KYC) để tạo lớp học mới.'),
+                        content: const Text('Bạn cần xác thực tài khoản (KYC) để mở lớp học mới.'),
                         actions: [
                           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Đóng')),
                           FilledButton(onPressed: () => context.push('/settings'), child: const Text('Cài đặt')),
