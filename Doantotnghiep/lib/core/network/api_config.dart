@@ -16,7 +16,7 @@ class ApiConfig {
   /// - Mac/Linux: Chạy `ifconfig` hoặc `ip addr`, tìm "inet"
   /// 
   /// **Ví dụ:** `192.168.1.100` hoặc `192.168.88.219`
-  static const String serverIp = '192.168.5.2';
+  static const String serverIp = '192.168.1.18';
   
   /// Port của Laravel server (thường là 8000)
   static const int serverPort = 8000;
