@@ -17,6 +17,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:doantotnghiep/features/booking/data/booking_provider.dart';
 import 'package:doantotnghiep/features/notification/presentation/providers/notification_provider.dart';
+import 'package:doantotnghiep/features/wallet/data/wallet_provider.dart';
 
 import 'package:doantotnghiep/core/theme/edu_theme.dart';
 
@@ -160,8 +161,8 @@ class _TutorDashboardScreenState extends ConsumerState<TutorDashboardScreen> {
       backgroundColor: EduTheme.background,
       floatingActionButton: FloatingActionButton(
         onPressed: () => context.push('/map'),
-        child: const Icon(Icons.map_outlined),
         tooltip: 'Bản đồ',
+        child: const Icon(Icons.map_outlined),
       ),
       body: SafeArea(
         child: RefreshIndicator(
@@ -183,7 +184,9 @@ class _TutorDashboardScreenState extends ConsumerState<TutorDashboardScreen> {
                 padding: const EdgeInsets.all(20),
                 sliver: SliverList(
                   delegate: SliverChildListDelegate([
-                    // Stats Grid (2x3)
+                    // Stats Grid Section
+                    _buildStatsHeader(),
+                    const SizedBox(height: 14),
                     _buildStatsGrid(rating),
                     const SizedBox(height: 24),
                     
@@ -396,62 +399,152 @@ class _TutorDashboardScreenState extends ConsumerState<TutorDashboardScreen> {
     );
   }
 
-  /// Stats Grid 2x3
-  Widget _buildStatsGrid(String rating) {
-    return GridView.count(
-      crossAxisCount: 3,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: 12,
-      crossAxisSpacing: 12,
-      childAspectRatio: 0.85,
+  /// Stats Header
+  Widget _buildStatsHeader() {
+    return Row(
       children: [
-        _buildStatCard(
-          icon: Icons.account_balance_wallet_rounded,
-          iconColor: EduTheme.success,
-          title: 'Thu nhập',
-          value: '2.5M đ',
-          subtitle: '↑ +15%',
-          trend: true,
+        Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: EduTheme.success.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: const Icon(Icons.analytics_rounded, size: 18, color: EduTheme.success),
         ),
-        _buildStatCard(
-          icon: Icons.school_rounded,
-          iconColor: EduTheme.primary,
-          title: 'Lớp đang dạy',
-          value: '3',
-          subtitle: 'Đang hoạt động',
-        ),
-        _buildStatCard(
-          icon: Icons.people_rounded,
-          iconColor: EduTheme.secondary,
-          title: 'Học viên',
-          value: '15',
-          subtitle: 'Hiện tại',
-        ),
-        _buildStatCard(
-          icon: Icons.star_rounded,
-          iconColor: Colors.amber,
-          title: 'Đánh giá',
-          value: rating,
-          subtitle: '(28 reviews)',
-        ),
-        _buildStatCard(
-          icon: Icons.access_time_rounded,
-          iconColor: EduTheme.purple,
-          title: 'Giờ dạy',
-          value: '24h',
-          subtitle: 'Tháng này',
-        ),
-        _buildStatCard(
-          icon: Icons.trending_up_rounded,
-          iconColor: Colors.teal,
-          title: 'Tỉ lệ đặt',
-          value: '85%',
-          subtitle: '↑ +5%',
-          trend: true,
+        const SizedBox(width: 10),
+        const Text(
+          'Thống kê & Thu nhập',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: EduTheme.textPrimary),
         ),
       ],
     );
+  }
+
+  /// Stats Grid 2x3
+  Widget _buildStatsGrid(String rating) {
+    return Consumer(
+      builder: (context, ref, child) {
+        final walletAsync = ref.watch(walletProvider);
+        final classesAsync = ref.watch(tutorClassProvider);
+        final bookingsAsync = ref.watch(bookingProvider);
+        final user = ref.watch(authRepositoryProvider).currentUser;
+
+        // 1. Wallet Balance
+        final balance = walletAsync.valueOrNull?.balance ?? 0.0;
+        final formattedBalance = NumberFormat.compactCurrency(
+          locale: 'vi_VN',
+          symbol: 'đ',
+          decimalDigits: 1,
+        ).format(balance);
+
+        // 2. Active Classes Count
+        final activeClassesCount = classesAsync.valueOrNull?.length ?? 0;
+
+        // 3. Total Students Count
+        final classes = classesAsync.valueOrNull ?? [];
+        final bookings = bookingsAsync.valueOrNull ?? [];
+        
+        final groupStudentIds = classes.expand((c) => c.students.map((s) => s['id']?.toString() ?? s['user_id']?.toString() ?? '')).where((id) => id.isNotEmpty).toSet();
+        final individualStudentIds = bookings.map((b) => b.userId).toSet();
+        final totalStudents = (groupStudentIds..addAll(individualStudentIds)).length;
+
+        // 4. Rating & Reviews
+        final reviewCount = user?.tutorProfile != null ? (user!.tutorProfile!['review_count'] ?? 0) : 0;
+
+        // 5. Teaching Hours (Month)
+        double totalHours = 0;
+        final now = DateTime.now();
+        final thisMonthBookings = bookings.where((b) => 
+          b.date.month == now.month && 
+          b.date.year == now.year &&
+          (b.status == 'Upcoming' || b.status == 'Completed')
+        );
+
+        for (var b in thisMonthBookings) {
+          totalHours += _calculateDurationInHours(b.timeSlot);
+        }
+        
+        // Add hours from group classes (estimated or from schedule)
+        // For simplicity, let's assume each group class session in schedule also counts.
+        // But group classes might have their own sessions. Let's stick to bookings for now
+        // as group classes might not have a simple "hours taught" field yet.
+
+        // 6. Booking Rate
+        // If we don't have rejection data, we'll use a placeholder or derived value
+        final bookingRate = user?.tutorProfile != null ? (user!.tutorProfile!['booking_rate'] ?? 95) : 95;
+
+        return GridView.count(
+          crossAxisCount: 3,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+          childAspectRatio: 0.85,
+          children: [
+            _buildStatCard(
+              icon: Icons.account_balance_wallet_rounded,
+              iconColor: EduTheme.success,
+              title: 'Thu nhập',
+              value: formattedBalance,
+              subtitle: 'Số dư ví',
+              trend: true,
+            ),
+            _buildStatCard(
+              icon: Icons.school_rounded,
+              iconColor: EduTheme.primary,
+              title: 'Lớp đang dạy',
+              value: activeClassesCount.toString(),
+              subtitle: 'Đang hoạt động',
+            ),
+            _buildStatCard(
+              icon: Icons.people_rounded,
+              iconColor: EduTheme.secondary,
+              title: 'Học viên',
+              value: totalStudents.toString(),
+              subtitle: 'Hiện tại',
+            ),
+            _buildStatCard(
+              icon: Icons.star_rounded,
+              iconColor: Colors.amber,
+              title: 'Đánh giá',
+              value: rating,
+              subtitle: '($reviewCount reviews)',
+            ),
+            _buildStatCard(
+              icon: Icons.access_time_rounded,
+              iconColor: EduTheme.purple,
+              title: 'Giờ dạy',
+              value: '${totalHours.round()}h',
+              subtitle: 'Tháng này',
+            ),
+            _buildStatCard(
+              icon: Icons.trending_up_rounded,
+              iconColor: Colors.teal,
+              title: 'Tỉ lệ đặt',
+              value: '$bookingRate%',
+              subtitle: '↑ +5%',
+              trend: true,
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  double _calculateDurationInHours(String timeSlot) {
+    try {
+      final parts = timeSlot.split(' - ');
+      if (parts.length == 2) {
+        final start = parts[0].split(':');
+        final end = parts[1].split(':');
+        final startMinutes = int.parse(start[0]) * 60 + int.parse(start[1]);
+        final endMinutes = int.parse(end[0]) * 60 + int.parse(end[1]);
+        return (endMinutes - startMinutes) / 60.0;
+      }
+    } catch (e) {
+      debugPrint('Error parsing timeSlot: $timeSlot');
+    }
+    return 0;
   }
 
   /// Booking Requests (From Students)
@@ -675,18 +768,13 @@ class _TutorDashboardScreenState extends ConsumerState<TutorDashboardScreen> {
             ),
             const SizedBox(width: 10),
             const Text(
-              'Thao tác nhanh',
+              'Giảng dạy và Lớp học',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: EduTheme.textPrimary),
             ),
           ],
         ),
         const SizedBox(height: 16),
         
-        // Group 1: Giảng dạy (Teaching)
-        const Padding(
-          padding: EdgeInsets.only(left: 4, bottom: 10),
-          child: Text('Giảng dạy & Lớp học', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.grey, fontSize: 13)),
-        ),
         GridView.count(
           crossAxisCount: 4,
           shrinkWrap: true,
@@ -695,17 +783,10 @@ class _TutorDashboardScreenState extends ConsumerState<TutorDashboardScreen> {
           crossAxisSpacing: 10,
           childAspectRatio: 0.85,
           children: [
-            _buildQuickActionButton(
-              context,
-              icon: Icons.add_circle_rounded,
-              label: 'Tạo lớp',
-              gradient: [EduTheme.primary, EduTheme.primaryLight],
-              onTap: () => context.push('/create-class'),
-            ),
              _buildQuickActionButton(
               context,
               icon: Icons.class_rounded,
-              label: 'Lớp học',
+              label: 'Khóa học nhóm',
               gradient: [Colors.orange, Colors.orangeAccent],
               onTap: () => context.push('/my-classes?index=0'),
             ),
@@ -718,7 +799,7 @@ class _TutorDashboardScreenState extends ConsumerState<TutorDashboardScreen> {
             ),
             _buildQuickActionButton(
               context,
-              icon: Icons.notifications_active_rounded,
+              icon: Icons.pending_actions_rounded,
               label: 'Yêu cầu',
               gradient: [const Color(0xFFF59E0B), const Color(0xFFFBBF24)],
               onTap: () => context.go('/tutor-dashboard/booking-requests'),

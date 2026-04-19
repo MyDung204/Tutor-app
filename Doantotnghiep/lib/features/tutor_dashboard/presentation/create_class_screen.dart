@@ -5,7 +5,7 @@
 /// - Cho phép gia sư thiết lập thông tin lớp học chi tiết
 /// 
 /// **Features:**
-/// - Tạo lớp mới: 1-1 hoặc nhóm
+/// - Mở lớp mới: 1-1 hoặc nhóm
 /// - Chỉnh sửa lớp: Cập nhật thông tin lớp đã tạo
 /// - Form validation: Kiểm tra các trường bắt buộc
 /// - Date picker: Chọn ngày bắt đầu
@@ -36,6 +36,7 @@ import 'package:doantotnghiep/features/tutor_dashboard/presentation/my_classes_s
 import 'package:doantotnghiep/features/tutor_dashboard/data/tutor_class_provider.dart';
 import 'package:doantotnghiep/core/exceptions/app_exceptions.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -115,6 +116,52 @@ class _CreateClassScreenState extends ConsumerState<CreateClassScreen> {
     // Validate form trước khi submit
     if (!_formKey.currentState!.validate()) return;
 
+    // Ràng buộc thời gian: Nếu chọn ngày bắt đầu là hôm nay, kiểm tra lịch học
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    if (_startDate.year == today.year && _startDate.month == today.month && _startDate.day == today.day) {
+       // Kiểm tra schedule
+       final scheduleText = _scheduleController.text;
+       final dayOfWeekMap = {
+         1: 'T2', 2: 'T3', 3: 'T4', 4: 'T5', 5: 'T6', 6: 'T7', 7: 'CN'
+       };
+       final todayLabel = dayOfWeekMap[now.weekday];
+       
+       // Parse schedule (e.g. "T2 19:00, T4 18:00" or "T2, T4 - 19:00")
+       if (scheduleText.contains(todayLabel!)) {
+          // Find time for today
+          final regex = RegExp('$todayLabel[:\\s]+(\\d{1,2}):(\\d{2})');
+          final match = regex.firstMatch(scheduleText);
+          
+          TimeOfDay? todayTime;
+          if (match != null) {
+             todayTime = TimeOfDay(hour: int.parse(match.group(1)!), minute: int.parse(match.group(2)!));
+          } else if (scheduleText.contains(' - ')) {
+             // Fallback for "T2, T3 - 19:00" format
+             final parts = scheduleText.split(' - ');
+             final timePart = parts[1];
+             final timeRegex = RegExp(r'(\d{1,2}):(\d{2})');
+             final timeMatch = timeRegex.firstMatch(timePart);
+             if (timeMatch != null) {
+                todayTime = TimeOfDay(hour: int.parse(timeMatch.group(1)!), minute: int.parse(timeMatch.group(2)!));
+             }
+          }
+
+          if (todayTime != null) {
+             final scheduleDateTime = DateTime(now.year, now.month, now.day, todayTime.hour, todayTime.minute);
+             if (scheduleDateTime.isBefore(now)) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Giờ học cho ngày hôm nay đã trôi qua. Vui lòng chọn thời gian khác hoặc ngày khác.'),
+                    backgroundColor: Colors.orange,
+                  ),
+                );
+                return;
+             }
+          }
+       }
+    }
+
     setState(() => _isLoading = true);
 
     final data = {
@@ -122,7 +169,7 @@ class _CreateClassScreenState extends ConsumerState<CreateClassScreen> {
       'subject': _subjectController.text,
       'grade_level': _gradeLevelController.text,
       'description': _descriptionController.text,
-      'price': double.parse(_priceController.text),
+      'price': double.parse(_priceController.text.replaceAll('.', '')),
       'max_students': int.parse(_maxStudentsController.text),
       'schedule': _scheduleController.text,
       'mode': _mode,
@@ -155,7 +202,7 @@ class _CreateClassScreenState extends ConsumerState<CreateClassScreen> {
              ref.invalidate(tutorClassProvider);
              ScaffoldMessenger.of(context).showSnackBar(
                const SnackBar(
-                 content: Text('Tạo lớp học thành công!'),
+                 content: Text('Mở lớp học thành công!'),
                  backgroundColor: Colors.green,
                ),
              );
@@ -219,18 +266,28 @@ class _CreateClassScreenState extends ConsumerState<CreateClassScreen> {
               Row(
                 children: [
                   Expanded(
-                    child: TextFormField(
-                      controller: _subjectController,
+                    child: DropdownButtonFormField<String>(
+                      initialValue: _subjectController.text.isNotEmpty && 
+                          ['Toán', 'Lý', 'Hóa', 'Tiếng Anh', 'Văn', 'Sinh', 'Sử', 'Địa', 'Tin học', 'Piano', 'Guitar'].contains(_subjectController.text)
+                          ? _subjectController.text : null,
                       decoration: const InputDecoration(labelText: 'Môn học', border: OutlineInputBorder()),
-                      validator: (v) => v == null || v.isEmpty ? 'Nhập môn' : null,
+                      items: ['Toán', 'Lý', 'Hóa', 'Tiếng Anh', 'Văn', 'Sinh', 'Sử', 'Địa', 'Tin học', 'Piano', 'Guitar']
+                          .map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+                      onChanged: (v) => setState(() => _subjectController.text = v!),
+                      validator: (v) => v == null || v.isEmpty ? 'Chọn môn' : null,
                     ),
                   ),
                   const SizedBox(width: 16),
                   Expanded(
-                    child: TextFormField(
-                      controller: _gradeLevelController,
+                    child: DropdownButtonFormField<String>(
+                      initialValue: _gradeLevelController.text.isNotEmpty && 
+                          ['Lớp 1', 'Lớp 2', 'Lớp 3', 'Lớp 4', 'Lớp 5', 'Lớp 6', 'Lớp 7', 'Lớp 8', 'Lớp 9', 'Lớp 10', 'Lớp 11', 'Lớp 12', 'Đại học', 'Người đi làm'].contains(_gradeLevelController.text)
+                          ? _gradeLevelController.text : null,
                       decoration: const InputDecoration(labelText: 'Lớp (Khối)', border: OutlineInputBorder()),
-                      validator: (v) => v == null || v.isEmpty ? 'Nhập khối' : null,
+                      items: ['Lớp 1', 'Lớp 2', 'Lớp 3', 'Lớp 4', 'Lớp 5', 'Lớp 6', 'Lớp 7', 'Lớp 8', 'Lớp 9', 'Lớp 10', 'Lớp 11', 'Lớp 12', 'Đại học', 'Người đi làm']
+                          .map((g) => DropdownMenuItem(value: g, child: Text(g))).toList(),
+                      onChanged: (v) => setState(() => _gradeLevelController.text = v!),
+                      validator: (v) => v == null || v.isEmpty ? 'Chọn lớp' : null,
                     ),
                   ),
                 ],
@@ -249,6 +306,10 @@ class _CreateClassScreenState extends ConsumerState<CreateClassScreen> {
                     child: TextFormField(
                       controller: _priceController,
                       keyboardType: TextInputType.number,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        _CurrencyInputFormatter(),
+                      ],
                       decoration: const InputDecoration(labelText: 'Học phí (VND)', border: OutlineInputBorder(), suffixText: 'đ'),
                       validator: (v) => v == null || v.isEmpty ? 'Nhập học phí' : null,
                     ),
@@ -327,13 +388,29 @@ class _CreateClassScreenState extends ConsumerState<CreateClassScreen> {
                     backgroundColor: Colors.blueAccent,
                     foregroundColor: Colors.white,
                   ),
-                  child: _isLoading ? const CircularProgressIndicator(color: Colors.white) : Text(widget.classToEdit != null ? 'Lưu thay đổi' : 'Tạo lớp học'),
+                  child: _isLoading ? const CircularProgressIndicator(color: Colors.white) : Text(widget.classToEdit != null ? 'Lưu thay đổi' : 'Mở lớp học'),
                 ),
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Formatter for currency with dot separator
+class _CurrencyInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+    if (newValue.text.isEmpty) return newValue;
+
+    final number = int.parse(newValue.text.replaceAll('.', ''));
+    final formatted = NumberFormat('#,###', 'vi_VN').format(number).replaceAll(',', '.');
+
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: formatted.length),
     );
   }
 }
